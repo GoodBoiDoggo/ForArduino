@@ -1,0 +1,197 @@
+The NILM project started in the 80's at the MIT by George W. Hart and his colleagues (he called it NALM though "Nonintrusive Appliance Load Monitoring). The first approach, that was patented by them, used hardware to estimate any power step change and managed to locate mainly resistive loads with a clear step change. The approach in Washington is to monitor the noise and harmonics that resonates over the phase when appliances are turned on or off or change their state. This approach requires high frequency monitoring and there might be a good ADC to translate this for the Arduino. A combination of these two approaches is currently being persued at MIT to detect and monitor large loads like climate controlling units in commercial buildings. 
+
+I have written a small moving window analysis of the incoming data for my arduino. The step changes are followed and once they are above a certain threshold they are matched against known measurements. I haven't had time to tidy up the code but I think you'll be able to follow it. Right now it only tracks one entity of power and only one phase but you can easily add the other measurements to get a more sophisticated recognition. If you have any questions or suggestions please let me know. 
+
+PS. Finding appliances today cheaply (without high frequency measurements) is really hard today since many of our appliances consume power very differently depending on how they are used and therefore blend together in measurements. You should be able to find the bigger appliances though with this code (washing maschine heater, toaster, electric kettle... - which is still fun )
+
+ 
+
+// Simple moving window or "t-test" statistical analysis 
+
+// of power measurements. 
+
+// Inspired by great projects like the MIT NALM and many others
+
+// Code scribbled by Anders Dalen and edited by Timm Teubner
+
+//=========================================================================
+
+// Appliance disaggregation variables
+
+//=========================================================================
+
+// Incoming values from energy measurements 
+
+// (code not included here)
+
+double measuredPower;
+
+// Constants to compare step change to known values
+
+const int minStateChange = 100; // Minimum 10W to be a state change
+
+const int stateCangeTolerance = 100;
+
+const int knownAppliances[] = {1400, 300, 1150};
+
+const char* knownApplianceNames[] = {"Electric Kettle","Iron","Washing Maschine"};
+
+// Setting up window constants and variables
+
+const byte windowSize = 10; // Has to be even (saves a loop)
+
+double window[windowSize];
+
+int stepCount = 0;
+
+boolean beginFound = false;
+
+double beginLevel = 0;
+
+boolean switchEvent = false;
+
+// Variables for t-test
+
+int switchStart;
+
+const double tValue = 2.8; // Sensitivity level for first step change
+
+double sum1=0, sum2=0, s1=0, s2=0;
+
+double x1Hat, x2Hat;
+
+double t0 = 0;
+
+double diff, denom, change;
+
+void loop()
+
+{    
+
+  // Just for pointing out when start is found in log
+
+  switchStart = 0;
+
+  
+
+  // tTesting  
+
+  for (int i=0; i<windowSize-1; i++) {
+
+    window[i] = window[i+1];
+
+  }
+
+  window[windowSize-1] = measuredPower;
+
+  
+
+  sum1=0, sum2=0;
+
+  
+
+  for (int i=0; i<windowSize/2; i++) {
+
+    sum1 += window[i];
+
+    sum2 += window[i + windowSize/2];
+
+  }
+
+  
+
+  x1Hat = sum1 / (windowSize/2);
+
+  x2Hat = sum2 / (windowSize/2);
+
+  
+
+  // 2. Calculating sum of squared deviation from mean
+
+  s1 = 0, s2 = 0;
+
+  for (int i=0; i < windowSize/2; i++) {
+
+    s1 += (window[i]-x1Hat) * (window[i]-x1Hat);
+
+    s2 += (window[i+ windowSize/2]-x2Hat) * (window[i+ windowSize/2]-x2Hat);  
+
+  }
+
+  
+
+  // 3. Dividing squared deviations to get sample variance
+
+  s1 = s1 / (windowSize/2-1) + 1; // adding +1 in order not to run into too high t-values when there is no standard deviation at all...
+
+  s2 = s2 / (windowSize/2-1) + 1;
+
+  
+
+  // t-Test calculation
+
+  diff = abs(x1Hat - x2Hat);
+
+  denom = sqrt((s1 + s2) / (windowSize/2));
+
+  t0 = diff / denom;
+
+  
+
+  // Finding the beginning of the step change
+
+  if (t0 >= tValue && !beginFound) {
+
+    beginLevel = x1Hat;
+
+    beginFound = true;
+
+    switchStart = 1;
+
+  }
+
+  
+
+  if (t0 >= tValue && beginFound) {
+
+     stepCount += 1;
+
+  }
+
+  
+
+  // Finding the end of the step change and saving the change value
+
+  if (t0 < tValue && beginFound) {
+
+    change = x2Hat - beginLevel;
+
+    switchEvent = true;
+
+    beginFound = false;
+
+  } else {
+
+    change = 0;
+
+  }
+
+  // I haven't tested this part, just put it here as an example of how one might write out a recognized step
+
+  if (change > minStateChange){
+
+    for (int i = 0; i < 3; i++){
+
+      if (change > knownAppliances[i] - stateCangeTolerance || 
+
+        change < knownAppliances[i] + stateCangeTolerance){
+
+        Serial.println(knownApplianceNames[i]);
+
+      }
+
+    }
+
+  }
+
+}  
